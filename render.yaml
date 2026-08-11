@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: meli-chatgpt-mcp
+    runtime: docker
+    healthCheckPath: /health
+    disk:
+      name: meli-token-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: MELI_MODE
+        value: mock
+      - key: MELI_SITE_ID
+        value: MLA
+      - key: TOKEN_STORE_PATH
+        value: /app/data/tokens.enc
+      - key: MELI_CLIENT_ID
+        sync: false
+      - key: MELI_CLIENT_SECRET
+        sync: false
+      - key: MELI_REDIRECT_URI
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: MCP_API_KEY
+        generateValue: true

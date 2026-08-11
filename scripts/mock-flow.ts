@@ -1,0 +1,18 @@
+process.env.NODE_ENV = 'test'; process.env.MELI_MODE = 'mock';
+const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+const { createMcpServer } = await import('../src/server.js');
+const { server } = createMcpServer(); const client = new Client({ name: 'mock-flow', version: '1.0.0' }); const [a, b] = InMemoryTransport.createLinkedPair();
+await server.connect(a); await client.connect(b);
+const call = async (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
+const auth = await call('meli_auth_status', {});
+const search = await call('meli_search_similar_products', { product_name: 'Mantel rectangular antimanchas estampado', measurements: '140 x 180 cm', material: 'tela', keywords: [] });
+const parsed = JSON.parse((search.content as any[])[0].text);
+const analysis = await call('meli_price_analysis', { comparables: parsed.comparables });
+const category = await call('meli_get_category', { title: 'Mantel rectangular antimanchas 140 x 180 cm' });
+const variants = await call('meli_generate_price_variants', { base_price: 25000, category_id: 'MLA436287', dimensions: '5x30x40,800', logistic_type: 'drop_off' });
+const preview = await call('meli_prepare_listing', { title: 'Mantel Rectangular Antimanchas 140 X 180 Cm', category_id: 'MLA436287', price: 25000, stock: 5, listing_type_id: 'gold_special', free_shipping: false, pictures: ['https://example.com/mantel.jpg'], attributes: [{ id: 'BRAND', value_name: 'Genérica' }, { id: 'MODEL', value_name: 'Antimanchas' }, { id: 'ITEM_CONDITION', value_id: '2230284' }], product_cost: 10000 });
+const blocked = await call('meli_create_listing', { draft: JSON.parse((preview.content as any[])[0].text).draft, confirmed: false, confirmation_word: '' });
+if (!blocked.isError) throw new Error('La protección PUBLICAR no bloqueó la creación');
+console.log(JSON.stringify({ auth: !auth.isError, comparable_count: parsed.count, analysis: !analysis.isError, category: !category.isError, variants: !variants.isError, preview: !preview.isError, real_publish_blocked: blocked.isError }, null, 2));
+await client.close(); await server.close();
