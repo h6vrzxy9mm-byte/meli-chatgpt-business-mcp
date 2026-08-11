@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
@@ -12,7 +12,7 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev --no-audit --no-fund
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
