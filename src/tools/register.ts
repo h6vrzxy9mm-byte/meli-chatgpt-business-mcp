@@ -26,6 +26,24 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
     const me = await client.me(); return ok(me ? { connected: true, seller_id: me.id, nickname: me.nickname } : { connected: false });
   });
 
+  server.registerTool('meli_upload_picture', {
+    description: 'Sube una imagen de ChatGPT directamente a Mercado Libre sin hacerla pública. Recibe base64 puro y devuelve el picture_id para usar en un borrador.',
+    inputSchema: {
+      filename: z.string().min(1),
+      mime_type: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+      content_base64: z.string().min(16)
+    },
+    annotations: readOnly
+  }, async ({ filename, mime_type, content_base64 }) => {
+    const clean = content_base64.replace(/^data:image\/(?:jpeg|jpg|png|webp);base64,/i, '').replace(/\s+/g, '');
+    const bytes = Buffer.from(clean, 'base64');
+    if (!bytes.length) throw new Error('La imagen está vacía o el base64 es inválido.');
+    if (bytes.length > 10 * 1024 * 1024) throw new Error('La imagen supera 10 MB.');
+    const normalizedMime = mime_type === 'image/jpeg' ? 'image/jpeg' : mime_type;
+    const uploaded = await client.uploadPicture(`data:${normalizedMime};base64,${clean}`);
+    return ok({ filename, bytes: bytes.length, picture_id: uploaded.id, source: uploaded.source ?? null });
+  });
+
   server.registerTool('meli_search_similar_products', { description: 'Busca publicaciones MLA activas y excluye comparables irrelevantes por tipo, medidas, material y packs.', inputSchema: productSchema, annotations: readOnly }, async (args) => {
     const query = [args.product_name, args.measurements, args.material, ...args.keywords].filter(Boolean).join(' ');
     const rows = filterComparables(await client.search(query), { productName: args.product_name, measurements: args.measurements, material: args.material, characteristics: args.characteristics, keywords: args.keywords });
@@ -44,7 +62,7 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
   });
 
   const estimateInput = { price: z.number().positive(), category_id: z.string(), listing_type_id: z.enum(['gold_special', 'gold_pro']), free_shipping: z.boolean().default(false), dimensions: z.string().optional(), logistic_type: z.string().optional(), product_cost: z.number().nonnegative().optional(), other_costs: z.number().nonnegative().default(0) };
-  server.registerTool('meli_estimate_sale', { description: 'Calcula cargos oficiales consultables, neto visible, ganancia y margen. Señala costos inciertos.', inputSchema: estimateInput, annotations: readOnly }, async (a) => {
+  server.registerTool('meli_estimate_sale', { description: 'Calcula cargos oficiales consultables, neto visible, ganancia y margen. Seññala costos inciertos.', inputSchema: estimateInput, annotations: readOnly }, async (a) => {
     const costs = await client.costs(a.price, a.category_id, a.listing_type_id, { free: a.free_shipping, dimensions: a.dimensions, logisticType: a.logistic_type }); costs.other += a.other_costs;
     const e = estimate(a.price, costs, a.product_cost);
     return ok({ ...e, summary: { 'Precio publicado': e.publishedPrice, 'Cargos Mercado Libre': costs.saleFee + costs.fixedFee, 'Envío a cargo vendedor': costs.shipping, 'Costo financiero': costs.financing, 'Otros cargos': costs.other, 'NETO ESTIMADO A COBRAR': e.net }, warnings: costs.unknown });
@@ -59,13 +77,18 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
     return ok({ target_net: target, rule: 'Cada neto es igual o mayor al objetivo; nunca menor.', variants });
   });
 
-  const draftSchema = { title: z.string().min(3).max(200), category_id: z.string(), price: z.number().positive(), stock: z.number().int().positive(), listing_type_id: z.enum(['gold_special', 'gold_pro']), free_shipping: z.boolean().default(false), pictures: z.array(z.string().min(1)).min(1), attributes: z.array(z.object({ id: z.string(), value_name: z.string().optional(), value_id: z.string().optional() })).default([]), description: z.string().optional(), family_name: z.string().optional(), product_cost: z.number().nonnegative().optional(), dimensions: z.string().optional(), logistic_type: z.string().optional() };
-  server.registerTool('meli_prepare_listing', { description: 'Genera una vista previa completa BORRADOR - NO PUBLICADO y valida atributos/costos. pictures acepta URLs HTTPS, data URLs o referencias de archivos subidos por ChatGPT.', inputSchema: draftSchema, annotations: readOnly }, async (a) => {
+  const draftSchema = {
+    title: z.string().min(3).max(200), category_id: z.string(), price: z.number().positive(), stock: z.number().int().positive(), listing_type_id: z.enum(['gold_special', 'gold_pro']), free_shipping: z.boolean().default(false),
+    pictures: z.array(z.string().min(1)).default([]), picture_ids: z.array(z.string().min(1)).default([]),
+    attributes: z.array(z.object({ id: z.string(), value_name: z.string().optional(), value_id: z.string().optional() })).default([]), description: z.string().optional(), family_name: z.string().optional(), product_cost: z.number().nonnegative().optional(), dimensions: z.string().optional(), logistic_type: z.string().optional()
+  };
+  server.registerTool('meli_prepare_listing', { description: 'Genera una vista previa completa BORRADOR - NO PUBLICADO y valida atributos/costos. Puede usar picture_ids devueltos por meli_upload_picture o URLs HTTPS en pictures.', inputSchema: draftSchema, annotations: readOnly }, async (a) => {
+    if (!a.pictures.length && !a.picture_ids.length) throw new Error('Se requiere al menos una imagen: pictures o picture_ids.');
     const attrs = await client.categoryAttributes(a.category_id); const supplied = new Set(a.attributes.filter((x) => x.value_id || x.value_name).map((x) => x.id));
     const missing = attrs.filter((x: any) => (x.tags?.required || x.tags?.catalog_required) && !supplied.has(x.id)).map((x: any) => ({ id: x.id, name: x.name }));
     const costs = await client.costs(a.price, a.category_id, a.listing_type_id, { free: a.free_shipping, dimensions: a.dimensions, logisticType: a.logistic_type });
     const sale = estimate(a.price, costs, a.product_cost);
-    const draft: ListingDraft = { title: a.title, family_name: a.family_name, category_id: a.category_id, price: a.price, currency_id: 'ARS', available_quantity: a.stock, buying_mode: 'buy_it_now', listing_type_id: a.listing_type_id, attributes: a.attributes, pictures: a.pictures.map((source) => ({ source })), shipping: { mode: 'me2', free_shipping: a.free_shipping }, description: a.description ? { plain_text: a.description } : undefined };
+    const draft: ListingDraft = { title: a.title, family_name: a.family_name, category_id: a.category_id, price: a.price, currency_id: 'ARS', available_quantity: a.stock, buying_mode: 'buy_it_now', listing_type_id: a.listing_type_id, attributes: a.attributes, pictures: [...a.picture_ids.map((id) => ({ id })), ...a.pictures.map((source) => ({ source }))], shipping: { mode: 'me2', free_shipping: a.free_shipping }, description: a.description ? { plain_text: a.description } : undefined };
     return ok({ status: 'BORRADOR - NO PUBLICADO', can_publish: missing.length === 0 && costs.unknown.length === 0, missing_required_attributes: missing, warnings: costs.unknown, draft, summary: { 'PRECIO QUE VE EL COMPRADOR': sale.publishedPrice, 'TOTAL DE CARGOS ESTIMADOS': sale.totalCharges, 'NETO ESTIMADO QUE COBRÁS': sale.net, 'GANANCIA ESTIMADA': sale.profit, 'MARGEN %': sale.marginPercent, ESTADO: 'BORRADOR - NO PUBLICADO' } });
   });
 
