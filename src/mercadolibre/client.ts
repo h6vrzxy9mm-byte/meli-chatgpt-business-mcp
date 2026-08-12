@@ -71,6 +71,11 @@ export class MercadoLibreClient {
     if (isMock) return { id: 'MLA-MOCK-NOT-PUBLISHED', status: 'mock', permalink: null };
     const pictures = await Promise.all(draft.pictures.map((p) => p.id ? p : this.uploadPicture(String(p.source ?? ''))));
     const { description, ...item } = { ...draft, pictures };
+    const me = await this.me();
+    if (me?.tags?.includes('user_product_seller')) {
+      item.family_name = item.family_name ?? item.title;
+      delete (item as Record<string, unknown>).title;
+    }
     const created = await this.request<any>('/items', { method: 'POST', body: JSON.stringify(item) });
     if (description?.plain_text && created.id) await this.request(`/items/${encodeURIComponent(created.id)}/description`, { method: 'POST', body: JSON.stringify(description) });
     return created;
