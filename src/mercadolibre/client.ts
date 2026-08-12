@@ -65,7 +65,23 @@ export class MercadoLibreClient {
   async uploadPicture(source: string): Promise<{ id?: string; source?: string }> {
     if (isMock) return { id: `MOCK-${Buffer.from(source).toString('base64url').slice(0, 12)}` };
     if (/^https:\/\//.test(source)) return { source };
-    throw new Error('En modo live la imagen debe ser una URL HTTPS accesible; no se modificó la foto');
+    const match = source.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.+)$/i);
+    if (match) {
+      const token = await this.oauth.accessToken();
+      if (!token) throw new Error('Cuenta de Mercado Libre no conectada. Abrí /oauth/meli/start.');
+      const mime = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+      const bytes = Buffer.from(match[2], 'base64');
+      const extension = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type: mime }), `picture.${extension}`);
+      const response = await fetch(`${API}/pictures/items/upload`, { method: 'POST', headers: { authorization: `Bearer ${token.accessToken}` }, body: form });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(`Mercado Libre picture upload ${response.status}: ${JSON.stringify(body)}`);
+      const id = body.id ?? body.variations?.[0]?.id;
+      if (!id) throw new Error(`Mercado Libre no devolvió id de imagen: ${JSON.stringify(body)}`);
+      return { id: String(id) };
+    }
+    throw new Error('La imagen debe ser una URL HTTPS o un data URL base64 (jpeg/png/webp).');
   }
   async createListing(draft: ListingDraft) {
     if (isMock) return { id: 'MLA-MOCK-NOT-PUBLISHED', status: 'mock', permalink: null };
