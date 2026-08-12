@@ -84,7 +84,7 @@ npm run dev
 - MCP: `http://localhost:3000/mcp`
 - Conectar Mercado Libre: `http://localhost:3000/oauth/meli/start`
 
-El endpoint `/mcp` requiere `Authorization: Bearer <MCP_API_KEY>`. No se escribe el token en logs.
+El endpoint `/mcp` permite sin autenticación únicamente el saludo MCP y la enumeración de metadatos necesaria para que ChatGPT detecte las herramientas. Las llamadas a herramientas y cualquier lectura operativa requieren `Authorization: Bearer <MCP_API_KEY>`. No se escribe el token en logs.
 
 ## Crear la aplicación en Mercado Libre
 
