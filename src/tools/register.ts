@@ -6,7 +6,12 @@ import { MercadoLibreClient } from '../mercadolibre/client.js';
 import { analyzePrices, filterComparables } from '../services/comparison-engine.js';
 import { estimate, priceForTargetNet } from '../services/net-price-calculator.js';
 
-const ok = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
+const ok = (value: unknown) => {
+  const structuredContent = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : { result: value };
+  return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], structuredContent };
+};
 const confirm = (confirmed: boolean, word: string) => {
   if (confirmed !== true || word !== 'PUBLICAR') throw new Error('Operación bloqueada: se requiere confirmed=true y confirmation_word="PUBLICAR" escrito explícitamente por la usuaria.');
 };
