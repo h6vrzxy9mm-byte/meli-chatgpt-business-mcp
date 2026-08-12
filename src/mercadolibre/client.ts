@@ -22,12 +22,12 @@ export class MercadoLibreClient {
   }
   async search(query: string, limit = 30): Promise<Comparable[]> {
     if (isMock) return mockComparables();
-    const data = await this.request<{ results: any[] }>(`/sites/MLA/search?q=${encodeURIComponent(query)}&limit=${limit}`, {}, false);
+    const data = await this.request<{ results: any[] }>(`/sites/MLA/search?q=${encodeURIComponent(query)}&limit=${limit}`);
     return data.results.map((x) => ({ id: x.id, title: x.title, price: x.price, permalink: x.permalink, categoryId: x.category_id, condition: x.condition, listingTypeId: x.listing_type_id, freeShipping: x.shipping?.free_shipping, installments: x.installments?.quantity ?? null, soldQuantity: x.sold_quantity, sellerReputation: x.seller?.seller_reputation?.level_id ?? null, attributes: x.attributes, relevanceScore: 0 }));
   }
   async predictCategory(title: string) {
     if (isMock) return { category_id: 'MLA436287', category_name: 'Manteles' };
-    const data = await this.request<any[]>(`/sites/MLA/domain_discovery/search?limit=1&q=${encodeURIComponent(title)}`, {}, false);
+    const data = await this.request<any[]>(`/sites/MLA/domain_discovery/search?limit=1&q=${encodeURIComponent(title)}`);
     if (!data[0]) throw new Error('Mercado Libre no pudo determinar una categoría');
     return data[0];
   }
@@ -38,14 +38,14 @@ export class MercadoLibreClient {
       { id: 'COLOR', name: 'Color', tags: {}, value_type: 'string' },
       { id: 'ITEM_CONDITION', name: 'Condición del ítem', tags: { required: true }, values: [{ id: '2230284', name: 'Nuevo' }] }
     ];
-    return this.request<any[]>(`/categories/${encodeURIComponent(categoryId)}/attributes`, {}, false);
+    return this.request<any[]>(`/categories/${encodeURIComponent(categoryId)}/attributes`);
   }
   async costs(price: number, categoryId: string, listingTypeId: string, shipping?: { free: boolean; dimensions?: string; logisticType?: string }): Promise<Costs> {
     if (isMock) {
       const premium = listingTypeId === 'gold_pro';
       return { saleFee: price * 0.14, fixedFee: price < 33000 ? 1200 : 0, financing: premium ? price * 0.09 : 0, shipping: shipping?.free ? 4200 : 0, other: 0, unknown: [] };
     }
-    const fees = await this.request<any>(`/sites/MLA/listing_prices?price=${price}&category_id=${encodeURIComponent(categoryId)}&listing_type_id=${encodeURIComponent(listingTypeId)}`, {}, false);
+    const fees = await this.request<any>(`/sites/MLA/listing_prices?price=${price}&category_id=${encodeURIComponent(categoryId)}&listing_type_id=${encodeURIComponent(listingTypeId)}`);
     const detail = fees.sale_fee_details ?? {};
     let shippingCost = 0; const unknown: string[] = [];
     if (shipping?.free) {
