@@ -69,11 +69,14 @@ export class MercadoLibreClient {
     if (match) {
       const token = await this.oauth.accessToken();
       if (!token) throw new Error('Cuenta de Mercado Libre no conectada. Abrí /oauth/meli/start.');
-      const mime = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
-      const bytes = Buffer.from(match[2], 'base64');
+      const mimeSource = match[1]!;
+      const payload = match[2]!;
+      const mime = mimeSource.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeSource.toLowerCase();
+      const bytes = Buffer.from(payload, 'base64');
+      const safeBytes = Uint8Array.from(bytes);
       const extension = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
       const form = new FormData();
-      form.append('file', new Blob([bytes], { type: mime }), `picture.${extension}`);
+      form.append('file', new Blob([safeBytes.buffer], { type: mime }), `picture.${extension}`);
       const response = await fetch(`${API}/pictures/items/upload`, { method: 'POST', headers: { authorization: `Bearer ${token.accessToken}` }, body: form });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`Mercado Libre picture upload ${response.status}: ${JSON.stringify(body)}`);
