@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import ExcelJS from 'exceljs';
+import sharp from 'sharp';
 import type { ListingDraft, ListingType } from '../types/index.js';
 import { MercadoLibreClient } from '../mercadolibre/client.js';
 import { analyzePrices, filterComparables } from '../services/comparison-engine.js';
@@ -27,21 +28,32 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
   });
 
   server.registerTool('meli_upload_picture', {
-    description: 'Sube una imagen de ChatGPT directamente a Mercado Libre sin hacerla pública. Recibe base64 puro y devuelve el picture_id para usar en un borrador.',
+    description: 'Sube una imagen de ChatGPT directamente a Mercado Libre sin hacerla pública. Normaliza el archivo a JPEG compatible y devuelve el picture_id para usar en un borrador.',
     inputSchema: {
       filename: z.string().min(1),
       mime_type: z.enum(['image/jpeg', 'image/png', 'image/webp']),
       content_base64: z.string().min(16)
     },
     annotations: readOnly
-  }, async ({ filename, mime_type, content_base64 }) => {
+  }, async ({ filename, content_base64 }) => {
     const clean = content_base64.replace(/^data:image\/(?:jpeg|jpg|png|webp);base64,/i, '').replace(/\s+/g, '');
     const bytes = Buffer.from(clean, 'base64');
     if (!bytes.length) throw new Error('La imagen está vacía o el base64 es inválido.');
     if (bytes.length > 10 * 1024 * 1024) throw new Error('La imagen supera 10 MB.');
-    const normalizedMime = mime_type === 'image/jpeg' ? 'image/jpeg' : mime_type;
-    const uploaded = await client.uploadPicture(`data:${normalizedMime};base64,${clean}`);
-    return ok({ filename, bytes: bytes.length, picture_id: uploaded.id, source: uploaded.source ?? null });
+    let normalized: Buffer;
+    try {
+      normalized = await sharp(bytes, { failOn: 'none' })
+        .rotate()
+        .flatten({ background: '#ffffff' })
+        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: false })
+        .jpeg({ quality: 90, chromaSubsampling: '4:2:0' })
+        .toBuffer();
+    } catch (error) {
+      throw new Error(`No se pudo normalizar la imagen: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const normalizedBase64 = normalized.toString('base64');
+    const uploaded = await client.uploadPicture(`data:image/jpeg;base64,${normalizedBase64}`);
+    return ok({ filename, original_bytes: bytes.length, normalized_bytes: normalized.length, normalized_mime_type: 'image/jpeg', picture_id: uploaded.id, source: uploaded.source ?? null });
   });
 
   server.registerTool('meli_search_similar_products', { description: 'Busca publicaciones MLA activas y excluye comparables irrelevantes por tipo, medidas, material y packs.', inputSchema: productSchema, annotations: readOnly }, async (args) => {
