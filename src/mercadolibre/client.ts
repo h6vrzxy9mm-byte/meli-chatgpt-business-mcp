@@ -73,11 +73,26 @@ export class MercadoLibreClient {
       const payload = match[2]!;
       const mime = mimeSource.toLowerCase() === 'image/jpg' ? 'image/jpeg' : mimeSource.toLowerCase();
       const bytes = Buffer.from(payload, 'base64');
-      const safeBytes = Uint8Array.from(bytes);
       const extension = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-      const form = new FormData();
-      form.append('file', new Blob([safeBytes.buffer], { type: mime }), `picture.${extension}`);
-      const response = await fetch(`${API}/pictures/items/upload`, { method: 'POST', headers: { authorization: `Bearer ${token.accessToken}` }, body: form });
+      const boundary = `----meli-chatgpt-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+      const head = Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="picture.${extension}"\r\n` +
+        `Content-Type: ${mime}\r\n\r\n`,
+        'utf8'
+      );
+      const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+      const multipart = Buffer.concat([head, bytes, tail]);
+      const response = await fetch(`${API}/pictures/items/upload`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token.accessToken}`,
+          accept: 'application/json',
+          'content-type': `multipart/form-data; boundary=${boundary}`,
+          'content-length': String(multipart.length)
+        },
+        body: multipart
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`Mercado Libre picture upload ${response.status}: ${JSON.stringify(body)}`);
       const id = body.id ?? body.variations?.[0]?.id;
