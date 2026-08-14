@@ -45,7 +45,7 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
       normalized = await sharp(bytes, { failOn: 'none' })
         .rotate()
         .flatten({ background: '#ffffff' })
-        .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: false })
+        .resize({ width: 1200, height: 1200, fit: 'contain', background: '#ffffff', withoutEnlargement: false })
         .jpeg({ quality: 90, chromaSubsampling: '4:2:0' })
         .toBuffer();
     } catch (error) {
