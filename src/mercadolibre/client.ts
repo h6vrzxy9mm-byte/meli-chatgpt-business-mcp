@@ -105,6 +105,7 @@ export class MercadoLibreClient {
     if (isMock) return { id: 'MLA-MOCK-NOT-PUBLISHED', status: 'mock', permalink: null };
     const pictures = await Promise.all(draft.pictures.map((p) => p.id ? p : this.uploadPicture(String(p.source ?? ''))));
     const { description, ...item } = { ...draft, pictures };
+    (item as Record<string, unknown>).condition = 'new';
     const me = await this.me();
     if (me?.tags?.includes('user_product_seller')) {
       item.family_name = item.family_name ?? item.title;
