@@ -1,6 +1,7 @@
 import { isMock } from '../config.js';
 import type { Comparable, Costs, ListingDraft } from '../types/index.js';
 import { MercadoLibreOAuth } from '../auth/mercadolibre-oauth.js';
+import sharp from 'sharp';
 
 const API = 'https://api.mercadolibre.com';
 
@@ -115,7 +116,26 @@ export class MercadoLibreClient {
     if (description?.plain_text && created.id) await this.request(`/items/${encodeURIComponent(created.id)}/description`, { method: 'POST', body: JSON.stringify(description) });
     return created;
   }
-  async updateListing(id: string, patch: Record<string, unknown>) { return isMock ? { id, status: 'mock-updated', patch } : this.request<any>(`/items/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) }); }
+  async updateListing(id: string, patch: Record<string, unknown>) {
+    if (isMock) return { id, status: 'mock-updated', patch };
+    const imageUrl = typeof patch.reprocess_picture_url === 'string' ? patch.reprocess_picture_url : null;
+    if (imageUrl) {
+      if (!imageUrl.startsWith('https://')) throw new Error('reprocess_picture_url debe usar HTTPS.');
+      const response = await fetch(imageUrl, { headers: { accept: 'image/*' } });
+      if (!response.ok) throw new Error(`No se pudo descargar la imagen (${response.status}).`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const square = await sharp(bytes, { failOn: 'none' })
+        .rotate()
+        .resize({ width: 1200, height: 1200, fit: 'contain', background: '#ffffff', withoutEnlargement: false })
+        .jpeg({ quality: 92, chromaSubsampling: '4:2:0' })
+        .toBuffer();
+      const uploaded = await this.uploadPicture(`data:image/jpeg;base64,${square.toString('base64')}`);
+      if (!uploaded.id) throw new Error('Mercado Libre no devolvió id para la imagen reprocesada.');
+      patch = { ...patch, pictures: [{ id: uploaded.id }] };
+      delete patch.reprocess_picture_url;
+    }
+    return this.request<any>(`/items/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) });
+  }
   async getListing(id: string) { return isMock ? { id, title: 'Publicación mock', status: 'active', price: 25000 } : this.request<any>(`/items/${encodeURIComponent(id)}`); }
   async listMine(status?: string) {
     if (isMock) return [{ id: 'MLA-MOCK-1', title: 'Mantel mock', status: status ?? 'active', price: 25000 }];
