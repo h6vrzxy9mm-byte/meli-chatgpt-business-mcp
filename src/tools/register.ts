@@ -28,32 +28,56 @@ export function registerTools(server: McpServer, client: MercadoLibreClient) {
   });
 
   server.registerTool('meli_upload_picture', {
-    description: 'Sube una imagen de ChatGPT directamente a Mercado Libre sin hacerla pública. Normaliza el archivo a JPEG compatible y devuelve el picture_id para usar en un borrador.',
+    description: 'Sube o reprocesa una imagen para Mercado Libre. Acepta base64 o una URL HTTPS y genera una foto cuadrada 1200x1200 sin bordes blancos sólidos.',
     inputSchema: {
       filename: z.string().min(1),
       mime_type: z.enum(['image/jpeg', 'image/png', 'image/webp']),
-      content_base64: z.string().min(16)
+      content_base64: z.string().min(16).optional(),
+      source_url: z.string().url().optional()
     },
     annotations: readOnly
-  }, async ({ filename, content_base64 }) => {
-    const clean = content_base64.replace(/^data:image\/(?:jpeg|jpg|png|webp);base64,/i, '').replace(/\s+/g, '');
-    const bytes = Buffer.from(clean, 'base64');
-    if (!bytes.length) throw new Error('La imagen está vacía o el base64 es inválido.');
+  }, async ({ filename, content_base64, source_url }) => {
+    let bytes: Buffer;
+    if (source_url) {
+      if (!source_url.startsWith('https://')) throw new Error('source_url debe usar HTTPS.');
+      const response = await fetch(source_url, { headers: { accept: 'image/*' } });
+      if (!response.ok) throw new Error(`No se pudo descargar la imagen (${response.status}).`);
+      bytes = Buffer.from(await response.arrayBuffer());
+    } else if (content_base64) {
+      const clean = content_base64.replace(/^data:image\/(?:jpeg|jpg|png|webp);base64,/i, '').replace(/\s+/g, '');
+      bytes = Buffer.from(clean, 'base64');
+    } else {
+      throw new Error('Se requiere content_base64 o source_url.');
+    }
+    if (!bytes.length) throw new Error('La imagen está vacía o es inválida.');
     if (bytes.length > 10 * 1024 * 1024) throw new Error('La imagen supera 10 MB.');
+
     let normalized: Buffer;
     try {
-      normalized = await sharp(bytes, { failOn: 'none' })
+      const background = await sharp(bytes, { failOn: 'none' })
         .rotate()
-        .flatten({ background: '#ffffff' })
-        .resize({ width: 1200, height: 1200, fit: 'contain', background: '#ffffff', withoutEnlargement: false })
-        .jpeg({ quality: 90, chromaSubsampling: '4:2:0' })
+        .resize({ width: 1200, height: 1200, fit: 'cover', position: 'centre' })
+        .blur(20)
+        .modulate({ brightness: 0.92, saturation: 0.75 })
+        .jpeg({ quality: 86, chromaSubsampling: '4:2:0' })
+        .toBuffer();
+
+      const foreground = await sharp(bytes, { failOn: 'none' })
+        .rotate()
+        .resize({ width: 1080, height: 1080, fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .png()
+        .toBuffer();
+
+      normalized = await sharp(background)
+        .composite([{ input: foreground, gravity: 'centre' }])
+        .jpeg({ quality: 92, chromaSubsampling: '4:2:0' })
         .toBuffer();
     } catch (error) {
       throw new Error(`No se pudo normalizar la imagen: ${error instanceof Error ? error.message : String(error)}`);
     }
     const normalizedBase64 = normalized.toString('base64');
     const uploaded = await client.uploadPicture(`data:image/jpeg;base64,${normalizedBase64}`);
-    return ok({ filename, original_bytes: bytes.length, normalized_bytes: normalized.length, normalized_mime_type: 'image/jpeg', picture_id: uploaded.id, source: uploaded.source ?? null });
+    return ok({ filename, original_bytes: bytes.length, normalized_bytes: normalized.length, normalized_width: 1200, normalized_height: 1200, normalized_mime_type: 'image/jpeg', picture_id: uploaded.id, source: uploaded.source ?? null });
   });
 
   server.registerTool('meli_search_similar_products', { description: 'Busca publicaciones MLA activas y excluye comparables irrelevantes por tipo, medidas, material y packs.', inputSchema: productSchema, annotations: readOnly }, async (args) => {
